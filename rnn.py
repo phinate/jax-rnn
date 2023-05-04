@@ -56,14 +56,14 @@ def output(
 @typechecker
 def loss(
     output: Float[Array, "embedding"],
-    next_embedding: Float[Array, "embedding"] 
+    next_one_hot_word: Float[Array, "vocab"] 
 ) -> jax.Array:
     # index the softmax probs at the word of interest
-    return -jnp.log(output[next_embedding.astype("bool")])[0]
+    return -jnp.log(output[next_one_hot_word.astype("bool")])[0]
 
 # @partial(jax.vmap, in_axes = (0, None))
 def make_embeddings(
-    one_hot_vec: Float[Array, "vocab"], 
+    one_hot_word: Float[Array, "vocab"], 
     params: Parameters
 ) -> Float[Array, "embedding"]:
     return params.embedding_matrix @ one_hot_vec
