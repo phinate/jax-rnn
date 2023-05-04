@@ -12,9 +12,10 @@ from functools import partial
 class Parameters(JaxClass):
     embedding_weights: Float[Array, "hidden_state embedding"]
     hidden_state_weights: Float[Array, "hidden_state hidden_state"]
-    output_weights: Float[Array, "embedding hidden_state"]
+    output_weights: Float[Array, "output hidden_state"]
     hidden_state_bias: Float[Array, "hidden_state"]
-    output_bias: Float[Array, "embedding"]
+    output_bias: Float[Array, "output"]
+    embedding_matrix: Float[Array, "embedding vocab"]
 
 e = 3
 h = 10
@@ -39,7 +40,7 @@ update_hidden_state(random_embed, init_state, init_pars)
 def output(
     hidden_state: Float[Array, "hidden_state"], 
     params: Parameters
-) -> Float[Array, "embedding"]:
+) -> Float[Array, "output"]:
     return jax.nn.softmax(params.output_weights @ hidden_state + params.output_bias)
 
 
@@ -53,12 +54,13 @@ def loss(
     return -jnp.log(output[next_embedding.astype("bool")])[0]
 
 # @partial(jax.vmap, in_axes = (0, None))
-@partial(jax.vmap, in_axes = (0, None))
 def make_embeddings(
     one_hot_vec: Float[Array, "vocab"], 
-    embedding_matrix: Float[Array, "embedding vocab"]
+    params: Parameters
 ) -> Float[Array, "embedding"]:
-    return embedding_matrix @ one_hot_vec
+    return params.embedding_matrix @ one_hot_vec
+
+embeddings_map = jax.vmap(make_embeddings, in_axes = (0, None))
 
 v = 100*e
 E = jnp.ones(shape=(e, v)) + .1
@@ -66,9 +68,23 @@ num_words = 5
 batch_size = 2
 sentence = jnp.array([jnp.zeros((v,)).at[3].set(1)]*num_words)
 batch = jnp.array([sentence for _ in range(batch_size)])
-print(make_embeddings(batch[0], embedding_matrix=E))
 
-def rnn(data: Float[Array, "batch sentence vocab"]):
-    embeddings = make_embeddings(data)  # ["batch sentence embedding"]
+def rnn(
+    data: Float[Array, "sentence vocab"], 
+    params: Parameters,
+    hidden_size: int = 5
+) -> Float[Array, "output"]:
+    embeddings = embeddings_map(data, E)  # ["sentence embedding"]
 
+    hidden_state = jnp.zeros((hidden_size,))
+    outputs = jnp.array([])
+    for word in embeddings:
+        hidden_state = update_hidden_state(word, hidden_state, params)
+        outputs = jnp.concatenate((outputs,output(hidden_state, params)))
+
+    return outputs
+
+    
+
+rnn(batch)
     
