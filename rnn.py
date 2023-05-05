@@ -68,7 +68,7 @@ def make_embeddings(
     one_hot_word: Float[Array, "vocab"], 
     params: Parameters
 ) -> Float[Array, "embedding"]:
-    return params.embedding_matrix @ one_hot_vec
+    return params.embedding_matrix @ one_hot_word
 
 embeddings_map = jax.vmap(make_embeddings, in_axes = (0, None))
 
