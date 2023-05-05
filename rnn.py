@@ -99,15 +99,12 @@ def update_step(
     next_words: Float[Array, "sentence vocab"], # data shifted by 1 to the right
     params: Parameters,
     hidden_size: int,
-    learning_rate: float,
 ) -> tuple[Parameters, Float[Array, ""]]:
     loss_val, gradients = loss_and_gradient(data, next_words, params, hidden_size)
-    scaled_gradients = jax.tree_map(lambda g: learning_rate * g, gradients)
-    new_params = jax.tree_map(lambda x, y: x-y, params, scaled_gradients)
 
-    return new_params, loss_val
+    return gradients, loss_val
 
-batched_update = jax.vmap(update_step, in_axes=(0, 0, None, None, None))
+batched_grads = jax.jit(jax.vmap(update_step, in_axes=(0, 0, None, None)),static_argnums=(3,))
 
 if __name__ == "__main__":
 
@@ -131,7 +128,7 @@ if __name__ == "__main__":
     all_words = re.findall(token_pattern, all_text.lower())
     vocab = list(set(all_words))
 
-    sentence_length = 5
+    sentence_length = 2
 
     vocab_one_hot_indicies = jnp.array([vocab.index(t) for t in all_words], dtype=jnp.int32)
     split_indicies = vocab_one_hot_indicies[:(len(vocab)//sentence_length)*sentence_length].reshape(len(vocab)//sentence_length,sentence_length)
@@ -142,7 +139,7 @@ if __name__ == "__main__":
     train_labels = split_indicies_labels[:partition_index]
     valid = split_indicies[partition_index:]
     valid_labels = split_indicies_labels[partition_index:]
-    print(valid.shape)
+
     def one_hot_sentence(sentence: Int[Array, "sentence"], vocab_size: int) -> Int[Array, "sentence vocab"]:
         return jnp.array([jnp.zeros((vocab_size,)).at[word].set(1) for word in sentence])
     
@@ -153,7 +150,6 @@ if __name__ == "__main__":
 
     def batches(training_data: Array, batch_size: int) -> Generator:
         num_train = training_data.shape[0]
-        print(num_train)
         num_complete_batches, leftover = divmod(num_train, batch_size)
         num_batches = num_complete_batches + bool(leftover)
 
@@ -172,7 +168,7 @@ if __name__ == "__main__":
     batch = batches(train, batch_size)
 
     e = 30
-    h = 10
+    h = 4
     v = len(vocab)
     o = v 
 
@@ -184,15 +180,18 @@ if __name__ == "__main__":
         output_bias = jnp.ones((o,)), 
         embedding_matrix = jnp.ones((e,v))
     )
-    num_iter = 1
-    lr = 4e-3
+    num_iter = 100
+    lr = 3e-4
     # init pars
     one_hot_valid, one_hot_valid_labels = batch_one_hot(valid), batch_one_hot(valid_labels)
-    print(valid.shape)
-    for _ in range(num_iter):
+    print(one_hot_valid_labels.shape)
+    for i in range(num_iter):
         sentences, sentence_labels = next(batch)
         one_hot_sentences, one_hot_sentence_labels = batch_one_hot(sentences), batch_one_hot(sentence_labels)
-        print(one_hot_sentences.shape)
-        pars, loss = batched_update(one_hot_sentences, one_hot_sentence_labels, pars, h, lr)
-        valid_loss = batched_forward_pass(one_hot_valid, one_hot_valid_labels, pars, h)
-        print("valid loss: {valid_loss:.3f}")
+        grads, loss = batched_grads(one_hot_sentences, one_hot_sentence_labels, pars, h)
+        _, valid_loss = batched_grads(one_hot_valid, one_hot_valid_labels, pars, h)
+        scaled_avg_gradients = jax.tree_map(lambda g: lr * g.mean(axis=0), grads)
+        pars = jax.tree_map(lambda x, y: x-y, pars, scaled_avg_gradients)
+        if i % 10 ==0:
+            print(f"train loss: {loss.mean():.3f}")
+            print(f"valid loss: {valid_loss.mean():.3f}")
