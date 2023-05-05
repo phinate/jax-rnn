@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, jaxtyped
@@ -17,23 +19,6 @@ class Parameters(JaxClass):
     output_bias: Float[Array, "vocab"]
     embedding_matrix: Float[Array, "embedding vocab"]
 
-e = 3
-h = 10
-v = 100*e
-num_words = 5
-o = v 
-batch_size = 2
-sentence = jnp.array([jnp.zeros((v,)).at[3].set(1)]*num_words)
-batch = jnp.array([sentence for _ in range(batch_size)])
-
-init_pars = Parameters(
-    embedding_weights = jnp.ones((h,e)), 
-    hidden_state_weights = jnp.ones((h,h)), 
-    output_weights = jnp.ones((o,h)), 
-    hidden_state_bias = jnp.ones((h,)), 
-    output_bias = jnp.ones((o,)), 
-    embedding_matrix = jnp.ones((e,v))
-)
 
 @jaxtyped
 @typechecker
@@ -57,11 +42,11 @@ def output(
 @jaxtyped
 @typechecker
 def loss(
-    output: Float[Array, "embedding"],
+    output: Float[Array, "vocab"],
     next_one_hot_word: Float[Array, "vocab"] 
 ) -> Float[Array, ""]:
     # index the softmax probs at the word of interest
-    return -jnp.log(output[next_one_hot_word.astype("bool")])[0]
+    return -jnp.log(output[jnp.argmax(next_one_hot_word)])
 
 loss_map = jax.vmap(loss, in_axes=(0, 0))
 
@@ -80,7 +65,7 @@ embeddings_map = jax.vmap(make_embeddings, in_axes = (0, None))
 def rnn(
     data: Float[Array, "sentence vocab"], 
     params: Parameters,
-    hidden_size: int = h
+    hidden_size: int
 ) -> Float[Array, "sentence vocab"]:
     embeddings = embeddings_map(data, params)  # ["sentence embedding"]
 
@@ -99,22 +84,27 @@ def forward_pass(
     data: Float[Array, "sentence vocab"],
     next_words: Float[Array, "sentence vocab"], # data shifted by 1 to the right
     params: Parameters,
-    hidden_size: int = h 
+    hidden_size: int
 ) -> Float[Array, ""]:
     output = rnn(data, params, hidden_size)
-    return loss_map(output, next_words)
+    return loss_map(output, next_words).mean(axis=0)
 
-loss_and_gradient = jax.value_and_grad(forward_pass)
+batched_forward_pass = jax.vmap(forward_pass, in_axes=(0, 0, None, None))
+loss_and_gradient = jax.value_and_grad(forward_pass, argnums=2)
 
+@jaxtyped
+@typechecker
 def update_step(
     data: Float[Array, "sentence vocab"],
     next_words: Float[Array, "sentence vocab"], # data shifted by 1 to the right
     params: Parameters,
-    learning_rate: float = 4e-2,
-    hidden_size: int = h 
-) -> Parameters:
+    hidden_size: int,
+    learning_rate: float,
+) -> tuple[Parameters, Float[Array, ""]]:
     loss_val, gradients = loss_and_gradient(data, next_words, params, hidden_size)
-    new_params = params - learning_rate * gradients
+    scaled_gradients = jax.tree_map(lambda g: learning_rate * g, gradients)
+    new_params = jax.tree_map(lambda x, y: x-y, params, scaled_gradients)
+
     return new_params, loss_val
 
 batched_update = jax.vmap(update_step, in_axes=(0, 0, None, None, None))
@@ -150,13 +140,13 @@ if __name__ == "__main__":
     partition_index = int(2*len(split_indicies/3))
     train = split_indicies[:partition_index]
     train_labels = split_indicies_labels[:partition_index]
-    test = split_indicies[partition_index:]
-    test_labels = split_indicies_labels[partition_index:]
+    valid = split_indicies[partition_index:]
+    valid_labels = split_indicies_labels[partition_index:]
 
     def one_hot_sentence(sentence: Int[Array, "sentence"], vocab_size: int) -> Int[Array, "sentence vocab"]:
         return jnp.array([jnp.zeros((vocab_size,)).at[word].set(1) for word in sentence])
     
-    batch_one_hot = jax.vmap(partial(one_hot_sentence, vocab_size = len(vocab)), in_axes=(0, None))
+    batch_one_hot = jax.vmap(partial(one_hot_sentence, vocab_size = len(vocab)))
     batch_size = 32
 
     import numpy.random as npr
@@ -180,10 +170,26 @@ if __name__ == "__main__":
 
 
     batch = batches(train, batch_size)
-    num_iter = 1000
+
+    e = 30
+    h = 10
+    v = len(vocab)
+    o = v 
+
+    pars = Parameters(
+        embedding_weights = jnp.ones((h,e)), 
+        hidden_state_weights = jnp.ones((h,h)), 
+        output_weights = jnp.ones((o,h)), 
+        hidden_state_bias = jnp.ones((h,)), 
+        output_bias = jnp.ones((o,)), 
+        embedding_matrix = jnp.ones((e,v))
+    )
+    num_iter = 1
+    lr = 4e-3
     # init pars
-    pars = 
     for _ in range(num_iter):
         sentences, sentence_labels = next(batch)
-        one_hot_sentences, one_hot_sentence_labels = batch_one_hot(sentences)
-        batched_update(sentences, sentence_labels)
+        one_hot_sentences, one_hot_sentence_labels = batch_one_hot(sentences), batch_one_hot(sentence_labels)
+        pars, loss = batched_update(one_hot_sentences, one_hot_sentence_labels, pars, h, lr)
+        valid_loss = batched_forward_pass(valid, valid_labels, pars, h)
+        print("valid loss: {valid_loss:.3f}")
