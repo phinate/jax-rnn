@@ -57,10 +57,11 @@ def output(
 def loss(
     output: Float[Array, "embedding"],
     next_one_hot_word: Float[Array, "vocab"] 
-) -> jax.Array:
+) -> Float[Array, ""]:
     # index the softmax probs at the word of interest
     return -jnp.log(output[next_one_hot_word.astype("bool")])[0]
 
+loss_map = jax.vmap(loss, in_axes=(0, 0))
 
 @jaxtyped
 @typechecker
@@ -89,7 +90,49 @@ def rnn(
 
     return jnp.array(outputs)
 
-    
+# @jax.jit
+@jaxtyped
+@typechecker
+def forward_pass(
+    data: Float[Array, "sentence vocab"],
+    next_words: Float[Array, "sentence vocab"], # data shifted by 1 to the right
+    params: Parameters,
+    hidden_size: int = h 
+) -> Float[Array, ""]:
+    output = rnn(data, params, hidden_size)
+    return loss_map(output, next_words)
 
-print(rnn(sentence, params=init_pars).shape)
-    
+loss_and_gradient = jax.value_and_grad(forward_pass)
+
+def update_step(
+    data: Float[Array, "sentence vocab"],
+    next_words: Float[Array, "sentence vocab"], # data shifted by 1 to the right
+    params: Parameters,
+    learning_rate: float = 4e-2,
+    hidden_size: int = h 
+) -> Parameters:
+    loss_val, gradients = loss_and_gradient(data, next_words, params, hidden_size)
+    new_params = params - learning_rate * gradients
+    return new_params, loss_val
+
+
+if __name__ == "__main__":
+
+    from datasets import load_dataset
+
+    file_name = 'bee-movie-names.txt'
+
+    with open(file_name, 'r+') as file:
+        text = [x for x in file.read().splitlines() if x != ' :']
+        num_lines = len(text)
+        # shuffle(text)
+        train = text[:2*int(num_lines/3)]
+        valid = text[2*int(num_lines/3):]
+
+    with open('train.txt', 'w+') as file:
+        file.writelines([t + r'\n' + '\n' for t in train])
+
+    with open('valid.txt', 'w+') as file:
+        file.writelines([t + r'\n' + '\n' for t in valid])
+
+    datasets = load_dataset("text", data_files={"train": 'train.txt', "validation": 'valid.txt'})
