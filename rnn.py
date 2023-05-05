@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, jaxtyped
 from beartype import beartype as typechecker
 from equinox import Module as JaxClass
+from typing import Generator
 
 
 @jaxtyped
@@ -166,11 +167,13 @@ if __name__ == "__main__":
                 perm = rng.permutation(num_train)
                 for i in range(num_batches):
                     batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                    yield [points[batch_idx] for points in train]
+                    print(batch_idx, batch_idx+1)
+                    yield [points[batch_idx] for points in train], [points[batch_idx+1] for points in train]
 
         return data_stream()
 
 
     batch_iterator = batches(train, batch_size)
+    print(next(batch_iterator)[0][0])
 
 
