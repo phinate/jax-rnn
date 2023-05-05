@@ -10,16 +10,16 @@ from equinox import Module as JaxClass
 class Parameters(JaxClass):
     embedding_weights: Float[Array, "hidden_state embedding"]
     hidden_state_weights: Float[Array, "hidden_state hidden_state"]
-    output_weights: Float[Array, "output hidden_state"]
+    output_weights: Float[Array, "vocab hidden_state"]
     hidden_state_bias: Float[Array, "hidden_state"]
-    output_bias: Float[Array, "output"]
+    output_bias: Float[Array, "vocab"]
     embedding_matrix: Float[Array, "embedding vocab"]
 
 e = 3
 h = 10
 v = 100*e
 num_words = 5
-o = num_words
+o = v 
 batch_size = 2
 sentence = jnp.array([jnp.zeros((v,)).at[3].set(1)]*num_words)
 batch = jnp.array([sentence for _ in range(batch_size)])
@@ -48,7 +48,7 @@ def update_hidden_state(
 def output(
     hidden_state: Float[Array, "hidden_state"], 
     params: Parameters
-) -> Float[Array, "output"]:
+) -> Float[Array, "vocab"]:
     return jax.nn.softmax(params.output_weights @ hidden_state + params.output_bias)
 
 
@@ -61,7 +61,9 @@ def loss(
     # index the softmax probs at the word of interest
     return -jnp.log(output[next_one_hot_word.astype("bool")])[0]
 
-# @partial(jax.vmap, in_axes = (0, None))
+
+@jaxtyped
+@typechecker
 def make_embeddings(
     one_hot_word: Float[Array, "vocab"], 
     params: Parameters
@@ -70,20 +72,22 @@ def make_embeddings(
 
 embeddings_map = jax.vmap(make_embeddings, in_axes = (0, None))
 
+@jaxtyped
+@typechecker
 def rnn(
     data: Float[Array, "sentence vocab"], 
     params: Parameters,
     hidden_size: int = h
-) -> Float[Array, "output"]:
+) -> Float[Array, "sentence vocab"]:
     embeddings = embeddings_map(data, params)  # ["sentence embedding"]
 
     hidden_state = jnp.zeros((hidden_size,))
-    outputs = jnp.array([])
+    outputs = []
     for word in embeddings:
         hidden_state = update_hidden_state(word, hidden_state, params)
-        outputs = jnp.concatenate((outputs, output(hidden_state, params)))
+        outputs.append(output(hidden_state, params))
 
-    return outputs
+    return jnp.array(outputs)
 
     
 
