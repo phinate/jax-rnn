@@ -187,9 +187,12 @@ if __name__ == "__main__":
     num_iter = 1
     lr = 4e-3
     # init pars
+    one_hot_valid, one_hot_valid_labels = batch_one_hot(valid), batch_one_hot(valid_labels)
+    print(valid.shape)
     for _ in range(num_iter):
         sentences, sentence_labels = next(batch)
         one_hot_sentences, one_hot_sentence_labels = batch_one_hot(sentences), batch_one_hot(sentence_labels)
+        print(one_hot_sentences.shape)
         pars, loss = batched_update(one_hot_sentences, one_hot_sentence_labels, pars, h, lr)
-        valid_loss = batched_forward_pass(valid, valid_labels, pars, h)
-        print("valid loss: {valid_loss:.3f}")
+        # valid_loss = batched_forward_pass(one_hot_valid, one_hot_valid_labels, pars, h)
+        # print("valid loss: {valid_loss:.3f}")
