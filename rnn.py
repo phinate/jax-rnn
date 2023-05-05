@@ -4,6 +4,7 @@ from jaxtyping import Array, Float, Int, jaxtyped
 from beartype import beartype as typechecker
 from equinox import Module as JaxClass
 from typing import Generator
+from functools import partial
 
 
 @jaxtyped
@@ -116,6 +117,7 @@ def update_step(
     new_params = params - learning_rate * gradients
     return new_params, loss_val
 
+batched_update = jax.vmap(update_step, in_axes=(0, 0, None, None, None))
 
 if __name__ == "__main__":
 
@@ -143,20 +145,25 @@ if __name__ == "__main__":
 
     vocab_one_hot_indicies = jnp.array([vocab.index(t) for t in all_words], dtype=jnp.int32)
     split_indicies = vocab_one_hot_indicies[:(len(vocab)//sentence_length)*sentence_length].reshape(len(vocab)//sentence_length,sentence_length)
-
+    # make last word random, shouldn't make too much of an impact (could be better handled with special char?)
+    split_indicies_labels = jnp.concatenate((vocab_one_hot_indicies[1:((len(vocab)-1)//sentence_length)*sentence_length], jnp.array([0]))).reshape((len(vocab)-1)//sentence_length,sentence_length)
     partition_index = int(2*len(split_indicies/3))
     train = split_indicies[:partition_index]
+    train_labels = split_indicies_labels[:partition_index]
     test = split_indicies[partition_index:]
+    test_labels = split_indicies_labels[partition_index:]
 
     def one_hot_sentence(sentence: Int[Array, "sentence"], vocab_size: int) -> Int[Array, "sentence vocab"]:
         return jnp.array([jnp.zeros((vocab_size,)).at[word].set(1) for word in sentence])
     
+    batch_one_hot = jax.vmap(partial(one_hot_sentence, vocab_size = len(vocab)), in_axes=(0, None))
     batch_size = 32
 
     import numpy.random as npr
 
     def batches(training_data: Array, batch_size: int) -> Generator:
-        num_train = training_data[0].shape[0]
+        num_train = training_data.shape[0]
+        print(num_train)
         num_complete_batches, leftover = divmod(num_train, batch_size)
         num_batches = num_complete_batches + bool(leftover)
 
@@ -167,13 +174,16 @@ if __name__ == "__main__":
                 perm = rng.permutation(num_train)
                 for i in range(num_batches):
                     batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                    print(batch_idx, batch_idx+1)
-                    yield [points[batch_idx] for points in train], [points[batch_idx+1] for points in train]
+                    yield train[batch_idx], train_labels[batch_idx]
 
         return data_stream()
 
 
-    batch_iterator = batches(train, batch_size)
-    print(next(batch_iterator)[0][0])
-
-
+    batch = batches(train, batch_size)
+    num_iter = 1000
+    # init pars
+    pars = 
+    for _ in range(num_iter):
+        sentences, sentence_labels = next(batch)
+        one_hot_sentences, one_hot_sentence_labels = batch_one_hot(sentences)
+        batched_update(sentences, sentence_labels)
