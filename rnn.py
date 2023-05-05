@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, jaxtyped
+from jaxtyping import Array, Float, Int, jaxtyped
 from beartype import beartype as typechecker
 from equinox import Module as JaxClass
 
@@ -118,21 +118,59 @@ def update_step(
 
 if __name__ == "__main__":
 
-    from datasets import load_dataset
-
+    import re
     file_name = 'bee-movie-names.txt'
 
     with open(file_name, 'r+') as file:
-        text = [x for x in file.read().splitlines() if x != ' :']
-        num_lines = len(text)
-        # shuffle(text)
-        train = text[:2*int(num_lines/3)]
-        valid = text[2*int(num_lines/3):]
+        all_text = file.read()
+        all_text = all_text.replace('\n', ' ').replace('  : ', '')
+        
+    # Define a regular expression pattern to match all punctuation marks
+    punctuation_pattern = r'[^\w\s]'
 
-    with open('train.txt', 'w+') as file:
-        file.writelines([t + r'\n' + '\n' for t in train])
+    # Define a regular expression pattern to match words with apostrophes
+    apostrophe_pattern = r'\w+(?:\'\w+)?'
 
-    with open('valid.txt', 'w+') as file:
-        file.writelines([t + r'\n' + '\n' for t in valid])
+    # Combine the two patterns to match all tokens
+    token_pattern = punctuation_pattern + '|' + apostrophe_pattern
 
-    datasets = load_dataset("text", data_files={"train": 'train.txt', "validation": 'valid.txt'})
+    # Split the text into tokens, including words with apostrophes as separate tokens
+    all_words = re.findall(token_pattern, all_text.lower())
+    vocab = list(set(all_words))
+
+    sentence_length = 5
+
+    vocab_one_hot_indicies = jnp.array([vocab.index(t) for t in all_words], dtype=jnp.int32)
+    split_indicies = vocab_one_hot_indicies[:(len(vocab)//sentence_length)*sentence_length].reshape(len(vocab)//sentence_length,sentence_length)
+
+    partition_index = int(2*len(split_indicies/3))
+    train = split_indicies[:partition_index]
+    test = split_indicies[partition_index:]
+
+    def one_hot_sentence(sentence: Int[Array, "sentence"], vocab_size: int) -> Int[Array, "sentence vocab"]:
+        return jnp.array([jnp.zeros((vocab_size,)).at[word].set(1) for word in sentence])
+    
+    batch_size = 32
+
+    import numpy.random as npr
+
+    def batches(training_data: Array, batch_size: int) -> Generator:
+        num_train = training_data[0].shape[0]
+        num_complete_batches, leftover = divmod(num_train, batch_size)
+        num_batches = num_complete_batches + bool(leftover)
+
+        # batching mechanism, ripped from the JAX docs :)
+        def data_stream():
+            rng = npr.RandomState(0)
+            while True:
+                perm = rng.permutation(num_train)
+                for i in range(num_batches):
+                    batch_idx = perm[i * batch_size : (i + 1) * batch_size]
+                    yield [points[batch_idx] for points in train]
+
+        return data_stream()
+
+
+    batch_iterator = batches(train, batch_size)
+
+
