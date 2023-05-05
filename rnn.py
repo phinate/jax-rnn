@@ -137,12 +137,12 @@ if __name__ == "__main__":
     split_indicies = vocab_one_hot_indicies[:(len(vocab)//sentence_length)*sentence_length].reshape(len(vocab)//sentence_length,sentence_length)
     # make last word random, shouldn't make too much of an impact (could be better handled with special char?)
     split_indicies_labels = jnp.concatenate((vocab_one_hot_indicies[1:((len(vocab)-1)//sentence_length)*sentence_length], jnp.array([0]))).reshape((len(vocab)-1)//sentence_length,sentence_length)
-    partition_index = int(2*len(split_indicies/3))
+    partition_index = 2*int(len(split_indicies)/3)
     train = split_indicies[:partition_index]
     train_labels = split_indicies_labels[:partition_index]
     valid = split_indicies[partition_index:]
     valid_labels = split_indicies_labels[partition_index:]
-
+    print(valid.shape)
     def one_hot_sentence(sentence: Int[Array, "sentence"], vocab_size: int) -> Int[Array, "sentence vocab"]:
         return jnp.array([jnp.zeros((vocab_size,)).at[word].set(1) for word in sentence])
     
@@ -194,5 +194,5 @@ if __name__ == "__main__":
         one_hot_sentences, one_hot_sentence_labels = batch_one_hot(sentences), batch_one_hot(sentence_labels)
         print(one_hot_sentences.shape)
         pars, loss = batched_update(one_hot_sentences, one_hot_sentence_labels, pars, h, lr)
-        # valid_loss = batched_forward_pass(one_hot_valid, one_hot_valid_labels, pars, h)
-        # print("valid loss: {valid_loss:.3f}")
+        valid_loss = batched_forward_pass(one_hot_valid, one_hot_valid_labels, pars, h)
+        print("valid loss: {valid_loss:.3f}")
