@@ -115,7 +115,7 @@ if __name__ == "__main__":
     all_words = re.findall(token_pattern, all_text.lower())
     vocab = list(set(all_words))
 
-    sentence_length = 2  # even for now...
+    sentence_length = 4  # even for now...
 
     vocab_one_hot_indicies = jnp.array([vocab.index(t) for t in all_words], dtype=jnp.int32)
     split_indicies = vocab_one_hot_indicies[:(len(vocab)//sentence_length)*sentence_length].reshape(len(vocab)//sentence_length,sentence_length)
@@ -131,7 +131,7 @@ if __name__ == "__main__":
         return jnp.array([jnp.zeros((vocab_size,)).at[word].set(1) for word in sentence])
     
     batch_one_hot = jax.vmap(partial(one_hot_sentence, vocab_size = len(vocab)))
-    batch_size = 32
+    batch_size = 64
 
     import numpy.random as npr
 
@@ -161,9 +161,9 @@ if __name__ == "__main__":
 
     pars = Parameters(
         embedding_weights = jnp.ones((h,e)), 
-        hidden_state_weights = jnp.ones((h,h)), 
+        hidden_state_weights = jnp.identity(h), 
         output_weights = jnp.ones((o,h)), 
-        hidden_state_bias = jnp.ones((h,)), 
+        hidden_state_bias = jnp.zeros((h,)), 
         output_bias = jnp.ones((o,)), 
         embedding_matrix = jnp.ones((e,v))
     )
