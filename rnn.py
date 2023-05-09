@@ -28,7 +28,7 @@ def update_hidden_state(
     hidden_state: Float[Array, "hidden_state"], 
     params: Parameters
 ) -> Float[Array, "hidden_state"]:
-    return jax.nn.relu(params.hidden_state_weights @ hidden_state + params.embedding_weights @ embedding + params.hidden_state_bias)
+    return jax.nn.tanh(params.hidden_state_weights @ hidden_state + params.embedding_weights @ embedding + params.hidden_state_bias)
 
 
 @jaxtyped
@@ -104,6 +104,7 @@ def predict_next_words(
     rnn_params: Parameters,
     rnn_hidden_size: int,
     num_predicted_tokens: int,
+    include_prompt = True,
 ) -> str:
     punctuation_pattern = r'[^\w\s]'
     apostrophe_pattern = r'\w+(?:\'\w+)?'
@@ -128,7 +129,8 @@ def predict_next_words(
     res = jnp.array(outputs)
     res_indicies = jnp.argmax(res, axis=1)
     words = [vocab[i] for i in res_indicies]
-    return ' '.join(words)
+    out = ' '.join(words)
+    return prompt + ' | ' + out if include_prompt else out
 
 
 if __name__ == "__main__":
@@ -153,13 +155,13 @@ if __name__ == "__main__":
     all_words = re.findall(token_pattern, all_text.lower())
     vocab = list(set(all_words))
 
-    sentence_length = 10  # even for now...
+    sentence_length = 6  # even for now...
 
     vocab_one_hot_indicies = jnp.array([vocab.index(t) for t in all_words], dtype=jnp.int32)
     split_indicies = vocab_one_hot_indicies[:(len(vocab)//sentence_length)*sentence_length].reshape(len(vocab)//sentence_length,sentence_length)
     # make last word random, shouldn't make too much of an impact (could be better handled with special char?)
     split_indicies_labels = jnp.concatenate((vocab_one_hot_indicies[1:((len(vocab)-1)//sentence_length)*sentence_length], jnp.array([0]))).reshape((len(vocab)-1)//sentence_length,sentence_length)
-    partition_index = 2*int(len(split_indicies)/3)
+    partition_index = 4*int(len(split_indicies)/5)
     train = split_indicies[:partition_index]
     train_labels = split_indicies_labels[:partition_index]
     valid = split_indicies[partition_index:]
@@ -167,7 +169,7 @@ if __name__ == "__main__":
 
     
     batch_one_hot = jax.vmap(partial(one_hot_sentence, vocab_size = len(vocab)))
-    batch_size = 100
+    batch_size = 200
 
     import numpy.random as npr
 
@@ -190,37 +192,49 @@ if __name__ == "__main__":
 
     batch = batches(train, batch_size)
 
-    e = 30
-    h = 8
+    e = 100
+    h = 32
     v = len(vocab)
     o = v 
 
     pars = Parameters(
-        embedding_weights = jnp.ones((h,e)), 
+        embedding_weights = jax.random.truncated_normal(lower=-0.1, upper=0.1, shape=[h, e], key=jax.random.PRNGKey(0)), 
         hidden_state_weights = jnp.identity(h),  # keep gradients from exploding
-        output_weights = jnp.ones((o,h)), 
-        hidden_state_bias = jnp.zeros((h,)), 
-        output_bias = jnp.ones((o,)),  # keep gradients from exploding
-        embedding_matrix = jnp.ones((e,v))
+        output_weights = jax.random.truncated_normal(lower=-0.1, upper=0.1, shape=[o, h], key=jax.random.PRNGKey(0)), 
+        hidden_state_bias = jnp.zeros((h,)),  # keep gradients from exploding
+        output_bias = jnp.zeros(shape=[o, ]),  
+        embedding_matrix = jax.random.truncated_normal(lower=-0.1, upper=0.1, shape=[e, v], key=jax.random.PRNGKey(0)), 
     )
     num_iter = 100
-    lr = 3.5e-4
+    lr = 2e-3
     one_hot_valid, one_hot_valid_labels = batch_one_hot(valid), batch_one_hot(valid_labels)
     best_loss = 999
     best_pars = None
+
+    import optax
+
+    opt = optax.chain(
+        optax.clip(1),
+        optax.adamw(learning_rate=lr),
+    )
+    opt_state = opt.init(pars)
+
     for i in range(num_iter):
         sentences, sentence_labels = next(batch)
         one_hot_sentences, one_hot_sentence_labels = batch_one_hot(sentences), batch_one_hot(sentence_labels)
         loss, grads = batched_grads(one_hot_sentences, one_hot_sentence_labels, pars, h)
         valid_loss, _ = batched_grads(one_hot_valid, one_hot_valid_labels, pars, h)
         loss, valid_loss = loss.mean(), valid_loss.mean()
-        pars = jax.tree_map(lambda p, g: p-lr*g.mean(axis=0), pars, grads)
+        # pars = jax.tree_map(lambda p, g: p-lr*g.mean(axis=0), pars, grads)
+        avg_grads = jax.tree_map(lambda g: g.mean(axis=0), grads)
+        updates, opt_state = opt.update(avg_grads, opt_state, params=pars)
+        pars = optax.apply_updates(pars, updates)
         if valid_loss < best_loss:
             best_pars = deepcopy(pars)
             best_loss = valid_loss
-        if i % 10 ==0:
+        if i % 20 ==0:
             print(f"train loss: {loss.mean():.3f}", end = ', ')
             print(f"valid loss: {valid_loss.mean():.3f}")
 
     print(f"best valid loss: {best_loss:.3f}")
-    print(predict_next_words('Hi! My name is', vocab, best_pars, h, 5))
+    print(predict_next_words('Hi! My name is', vocab, best_pars, h, 10, include_prompt=True))
