@@ -93,6 +93,44 @@ def forward_pass(
 loss_and_gradient = jax.value_and_grad(forward_pass, argnums=2)
 batched_grads = jax.jit(jax.vmap(loss_and_gradient, in_axes=(0, 0, None, None)),static_argnums=(3,))
 
+
+def one_hot_sentence(sentence: Int[Array, "sentence"], vocab_size: int) -> Int[Array, "sentence vocab"]:
+    return jnp.array([jnp.zeros((vocab_size,)).at[word].set(1) for word in sentence])
+
+
+def predict_next_words(
+    prompt: str,
+    vocab: list[str],
+    rnn_params: Parameters,
+    rnn_hidden_size: int,
+    num_predicted_tokens: int,
+) -> str:
+    punctuation_pattern = r'[^\w\s]'
+    apostrophe_pattern = r'\w+(?:\'\w+)?'
+    token_pattern = punctuation_pattern + '|' + apostrophe_pattern
+    tokens = re.findall(token_pattern, prompt.lower()) 
+    one_hot_indicies = jnp.array([vocab.index(t) for t in tokens], dtype=jnp.int32)
+    sentence = one_hot_sentence(one_hot_indicies, len(vocab))
+    embeddings = embeddings_map(sentence, rnn_params)  # ["sentence embedding"]
+
+    hidden_state = jnp.zeros((rnn_hidden_size,))
+    outputs = [None]*num_predicted_tokens
+    for word in embeddings[:-1]:
+        hidden_state = update_hidden_state(word, hidden_state, rnn_params)
+    hidden_state = update_hidden_state(embeddings[-1], hidden_state, rnn_params)
+    outputs[0] = output(hidden_state, rnn_params)
+    
+    for i in range(1, num_predicted_tokens):
+        embedded_pred = make_embeddings(outputs[i-1], rnn_params)
+        hidden_state = update_hidden_state(embedded_pred, hidden_state, rnn_params)
+        outputs[i] = output(hidden_state, rnn_params)
+
+    res = jnp.array(outputs)
+    res_indicies = jnp.argmax(res, axis=1)
+    words = [vocab[i] for i in res_indicies]
+    return ' '.join(words)
+
+
 if __name__ == "__main__":
 
     import re
@@ -115,7 +153,7 @@ if __name__ == "__main__":
     all_words = re.findall(token_pattern, all_text.lower())
     vocab = list(set(all_words))
 
-    sentence_length = 4  # even for now...
+    sentence_length = 10  # even for now...
 
     vocab_one_hot_indicies = jnp.array([vocab.index(t) for t in all_words], dtype=jnp.int32)
     split_indicies = vocab_one_hot_indicies[:(len(vocab)//sentence_length)*sentence_length].reshape(len(vocab)//sentence_length,sentence_length)
@@ -127,11 +165,9 @@ if __name__ == "__main__":
     valid = split_indicies[partition_index:]
     valid_labels = split_indicies_labels[partition_index:]
 
-    def one_hot_sentence(sentence: Int[Array, "sentence"], vocab_size: int) -> Int[Array, "sentence vocab"]:
-        return jnp.array([jnp.zeros((vocab_size,)).at[word].set(1) for word in sentence])
     
     batch_one_hot = jax.vmap(partial(one_hot_sentence, vocab_size = len(vocab)))
-    batch_size = 64
+    batch_size = 100
 
     import numpy.random as npr
 
@@ -155,16 +191,16 @@ if __name__ == "__main__":
     batch = batches(train, batch_size)
 
     e = 30
-    h = 4
+    h = 8
     v = len(vocab)
     o = v 
 
     pars = Parameters(
         embedding_weights = jnp.ones((h,e)), 
-        hidden_state_weights = jnp.identity(h), 
+        hidden_state_weights = jnp.identity(h),  # keep gradients from exploding
         output_weights = jnp.ones((o,h)), 
         hidden_state_bias = jnp.zeros((h,)), 
-        output_bias = jnp.ones((o,)), 
+        output_bias = jnp.ones((o,)),  # keep gradients from exploding
         embedding_matrix = jnp.ones((e,v))
     )
     num_iter = 100
@@ -178,10 +214,13 @@ if __name__ == "__main__":
         loss, grads = batched_grads(one_hot_sentences, one_hot_sentence_labels, pars, h)
         valid_loss, _ = batched_grads(one_hot_valid, one_hot_valid_labels, pars, h)
         loss, valid_loss = loss.mean(), valid_loss.mean()
-        scaled_avg_gradients = jax.tree_map(lambda g: lr * g.mean(axis=0), grads)
-        pars = jax.tree_map(lambda x, y: x-y, pars, scaled_avg_gradients)
+        pars = jax.tree_map(lambda p, g: p-lr*g.mean(axis=0), pars, grads)
         if valid_loss < best_loss:
             best_pars = deepcopy(pars)
+            best_loss = valid_loss
         if i % 10 ==0:
-            print(f"train loss: {loss.mean():.3f}")
+            print(f"train loss: {loss.mean():.3f}", end = ', ')
             print(f"valid loss: {valid_loss.mean():.3f}")
+
+    print(f"best valid loss: {best_loss:.3f}")
+    print(predict_next_words('Hi! My name is', vocab, best_pars, h, 5))
