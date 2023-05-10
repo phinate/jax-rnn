@@ -106,9 +106,18 @@ def predict_next_words(
     num_predicted_tokens: int,
     include_prompt = True,
 ) -> str:
+    # Define a regular expression pattern to match all punctuation marks
     punctuation_pattern = r'[^\w\s]'
+
+    # Define a regular expression pattern to match words with apostrophes
     apostrophe_pattern = r'\w+(?:\'\w+)?'
-    token_pattern = punctuation_pattern + '|' + apostrophe_pattern
+    # Define a regular expression pattern to match newlines
+    newline_pattern = r'\n'
+
+    # Combine the three patterns to match all tokens
+    token_pattern = punctuation_pattern + '|' + apostrophe_pattern + '|' + newline_pattern
+
+    
     tokens = re.findall(token_pattern, prompt.lower()) 
     one_hot_indicies = jnp.array([vocab.index(t) for t in tokens], dtype=jnp.int32)
     sentence = one_hot_sentence(one_hot_indicies, len(vocab))
@@ -136,32 +145,35 @@ def predict_next_words(
 if __name__ == "__main__":
 
     import re
-    file_name = 'bee-movie-names.txt'
+    file_name = 'one-fish-two-fish.txt'
 
     with open(file_name, 'r+') as file:
         all_text = file.read()
-        all_text = all_text.replace('\n', ' ').replace('  : ', '')
+        # all_text = all_text.replace('\n', ' ').replace('  : ', '')
         
     # Define a regular expression pattern to match all punctuation marks
     punctuation_pattern = r'[^\w\s]'
 
     # Define a regular expression pattern to match words with apostrophes
     apostrophe_pattern = r'\w+(?:\'\w+)?'
+    # Define a regular expression pattern to match newlines
+    newline_pattern = r'\n'
 
-    # Combine the two patterns to match all tokens
-    token_pattern = punctuation_pattern + '|' + apostrophe_pattern
+    # Combine the three patterns to match all tokens
+    token_pattern = punctuation_pattern + '|' + apostrophe_pattern + '|' + newline_pattern
+
 
     # Split the text into tokens, including words with apostrophes as separate tokens
     all_words = re.findall(token_pattern, all_text.lower())
     vocab = list(set(all_words))
 
-    sentence_length = 6  # even for now...
+    sentence_length = 8  # even for now...
 
     vocab_one_hot_indicies = jnp.array([vocab.index(t) for t in all_words], dtype=jnp.int32)
     split_indicies = vocab_one_hot_indicies[:(len(vocab)//sentence_length)*sentence_length].reshape(len(vocab)//sentence_length,sentence_length)
     # make last word random, shouldn't make too much of an impact (could be better handled with special char?)
     split_indicies_labels = jnp.concatenate((vocab_one_hot_indicies[1:((len(vocab)-1)//sentence_length)*sentence_length], jnp.array([0]))).reshape((len(vocab)-1)//sentence_length,sentence_length)
-    partition_index = 4*int(len(split_indicies)/5)
+    partition_index = 6*int(len(split_indicies)/7)
     train = split_indicies[:partition_index]
     train_labels = split_indicies_labels[:partition_index]
     valid = split_indicies[partition_index:]
@@ -193,7 +205,7 @@ if __name__ == "__main__":
     batch = batches(train, batch_size)
 
     e = 100
-    h = 32
+    h = 16
     v = len(vocab)
     o = v 
 
@@ -205,8 +217,8 @@ if __name__ == "__main__":
         output_bias = jnp.zeros(shape=[o, ]),  
         embedding_matrix = jax.random.truncated_normal(lower=-0.1, upper=0.1, shape=[e, v], key=jax.random.PRNGKey(0)), 
     )
-    num_iter = 100
-    lr = 2e-3
+    num_iter = 400
+    lr = 4e-3
     one_hot_valid, one_hot_valid_labels = batch_one_hot(valid), batch_one_hot(valid_labels)
     best_loss = 999
     best_pars = None
@@ -237,4 +249,4 @@ if __name__ == "__main__":
             print(f"valid loss: {valid_loss.mean():.3f}")
 
     print(f"best valid loss: {best_loss:.3f}")
-    print(predict_next_words('Hi! My name is', vocab, best_pars, h, 10, include_prompt=True))
+    print(predict_next_words('Big fish ', vocab, pars, h, 10, include_prompt=True))
