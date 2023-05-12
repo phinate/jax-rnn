@@ -3,7 +3,7 @@
 very lightweight JAX rnn for educational purposes
 
 open me in colab:
-<a target="_blank" href="https://colab.research.google.com/github/phinate/jax-rnn/demo.ipynb">
+<a target="_blank" href="https://colab.research.google.com/github/phinate/jax-rnn/blob/main/demo.ipynb">
 <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
