@@ -62,10 +62,16 @@ def rnn(
     embeddings = embeddings_map(data, params)  # ["sentence embedding"]
 
     hidden_state = jnp.zeros((hidden_size,))
-    outputs = []
-    for word in embeddings:
+
+    def update_fn(carry, input):
+        hidden_state, params = carry
+        word = input
         hidden_state = update_hidden_state(word, hidden_state, params)
-        outputs.append(output(hidden_state, params))
+        out = output(hidden_state, params)
+        return (hidden_state, params), out
+
+    carry = (hidden_state, params)
+    _, outputs = jax.lax.scan(update_fn, carry, embeddings)
 
     return jnp.array(outputs)
 
